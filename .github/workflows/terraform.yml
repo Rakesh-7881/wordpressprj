@@ -1,39 +1,38 @@
-name: OpenTofu CI/CD
+name: Deploy Infrastructure
 
 on:
   push:
     branches:
       - main
-      - 'feature/**'
+  pull_request:
+    branches:
+      - feature/*
 
 jobs:
-  terraform:
-    name: OpenTofu
+  deploy:
     runs-on: ubuntu-latest
 
-    env:
-      ARM_CLIENT_ID: ${{ secrets.AZURE_CREDENTIALS_CLIENT_ID }}
-      ARM_CLIENT_SECRET: ${{ secrets.AZURE_CREDENTIALS_CLIENT_SECRET }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      ARM_TENANT_ID: ${{ secrets.AZURE_CREDENTIALS_TENANT_ID }}
-      ARM_ACCESS_KEY: ${{ secrets.AZURE_STORAGE_ACCESS_KEY }}
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Setup OpenTofu
-        uses: hashicorp/setup-terraform@v2
+      - name: Log in to Azure
+        uses: azure/login@v1
         with:
-          terraform_version: "1.5.0"
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Terraform Init
-        run: terraform init
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: latest
 
-      - name: Terraform Plan
+      - name: Initialize OpenTofu
+        run: tofu init
+
+      - name: Plan
         if: github.ref != 'refs/heads/main'
-        run: terraform plan
+        run: tofu plan
 
-      - name: Terraform Apply
+      - name: Apply
         if: github.ref == 'refs/heads/main'
-        run: terraform apply -auto-approve
+        run: tofu apply -auto-approve
