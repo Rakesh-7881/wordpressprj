@@ -1,3 +1,7 @@
+concurrency:
+  group: tofu-state-lock
+  cancel-in-progress: false
+
 name: Deploy Infrastructure
 
 on:
