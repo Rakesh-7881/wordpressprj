@@ -38,14 +38,14 @@ jobs:
           tofu_version: latest
 
       - name: Initialize OpenTofu
-        run: tofu init
+        run: tofu init -reconfigure
 
       - name: Plan
         if: github.ref == 'refs/heads/main'
-        run: tofu plan -lock=false
+        run: tofu plan 
 
 
       - name: Apply
         if: github.ref == 'refs/heads/main'
-        run: tofu apply -auto-approve -lock=false
+        run: tofu apply -auto-approve
 
