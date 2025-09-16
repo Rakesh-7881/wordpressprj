@@ -41,7 +41,7 @@ jobs:
         run: tofu init
 
       - name: Plan
-        if: github.ref != 'refs/heads/main'
+        if: github.ref == 'refs/heads/main'
         run: tofu plan
 
       - name: Apply
