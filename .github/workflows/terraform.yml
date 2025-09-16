@@ -42,7 +42,9 @@ jobs:
 
       - name: Plan
         if: github.ref == 'refs/heads/main'
-        run: tofu plan -lock=false 
+        run: |
+          ls -ltrh
+          tofu plan -lock=false 
 
 
       - name: Apply
