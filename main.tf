@@ -1,7 +1,6 @@
 provider "azurerm" {
   features {}
 }
-
 # Resource Group
 resource "azurerm_resource_group" "wordpress" {
   name     = "rg-wordpress-app"
