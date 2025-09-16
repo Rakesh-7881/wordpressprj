@@ -1,8 +1,8 @@
+name: Deploy WordPress Infrastructure
+
 concurrency:
   group: tofu-state-lock
   cancel-in-progress: false
-
-name: Deploy Infrastructure
 
 on:
   push:
@@ -17,14 +17,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1️⃣ Checkout repo
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2️⃣ Log in to Azure using Service Principal
       - name: Log in to Azure
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      # 3️⃣ Set SP environment variables for OpenTofu
       - name: Set environment variables for OpenTofu
         run: |
           echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}" >> $GITHUB_ENV
@@ -32,22 +35,27 @@ jobs:
           echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CREDENTIALS).subscriptionId }}" >> $GITHUB_ENV
           echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CREDENTIALS).tenantId }}" >> $GITHUB_ENV
 
+      # 4️⃣ Set up OpenTofu CLI
       - name: Set up OpenTofu
         uses: opentofu/setup-opentofu@v1
         with:
           tofu_version: latest
 
+      # 5️⃣ Initialize OpenTofu backend
       - name: Initialize OpenTofu
         run: tofu init -reconfigure
 
-      - name: Plan
+      # 6️⃣ Terraform plan for feature branches
+      - name: Plan Infrastructure (feature branch)
+        if: startsWith(github.ref, 'refs/heads/feature/')
+        run: tofu plan -lock=false
+
+      # 7️⃣ Terraform plan for main branch before apply (optional)
+      - name: Plan Infrastructure (main branch)
         if: github.ref == 'refs/heads/main'
-        run: |
-          ls -ltrh
-          tofu plan -lock=false 
+        run: tofu plan -lock=false
 
-
-      - name: Apply
+      # 8️⃣ Apply only on main branch
+      - name: Apply Infrastructure
         if: github.ref == 'refs/heads/main'
         run: tofu apply -auto-approve
-
