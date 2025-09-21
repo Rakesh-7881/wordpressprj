@@ -1,61 +1,95 @@
-name: Deploy WordPress Infrastructure
-
-concurrency:
-  group: tofu-state-lock
-  cancel-in-progress: false
+name: OpenTofu CI (Plan / Apply)
 
 on:
   push:
     branches:
       - main
+      - 'feature/**'
+      - 'bugfix/**'
+      - 'hotfix/**'
   pull_request:
     branches:
-      - feature/*
+      - main
+
+env:
+  INFRA_DIR: infra
+
+concurrency:
+  group: "opentofu-${{ github.ref }}"    # ensures runs for the same ref cancel previous
+  cancel-in-progress: true
 
 jobs:
-  deploy:
+  plan:
+    # Run for non-main pushes and for PRs
+    if: ${{ github.ref != 'refs/heads/main' || github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
-
     steps:
-      # 1️⃣ Checkout repo
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # 2️⃣ Log in to Azure using Service Principal
-      - name: Log in to Azure
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+
+      - name: Login to Azure (Service Principal)
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # 3️⃣ Set SP environment variables for OpenTofu
-      - name: Set environment variables for OpenTofu
+      - name: Init backend and Plan
+        working-directory: ${{ env.INFRA_DIR }}
+        env:
+          TFSTATE_RG: ${{ secrets.AZURE_STATE_RG }}
+          TFSTATE_SA: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          TFSTATE_CONTAINER: ${{ secrets.AZURE_STORAGE_CONTAINER }}
+          AZURE_STORAGE_ACCESS_KEY: ${{ secrets.AZURE_STORAGE_ACCESS_KEY }}
+          TFSTATE_KEY: "plans/${{ github.sha }}.tfstate"
         run: |
-          echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}" >> $GITHUB_ENV
-          echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}" >> $GITHUB_ENV
-          echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CREDENTIALS).subscriptionId }}" >> $GITHUB_ENV
-          echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CREDENTIALS).tenantId }}" >> $GITHUB_ENV
+          tofu init \
+            -backend-config="resource_group_name=${TFSTATE_RG}" \
+            -backend-config="storage_account_name=${TFSTATE_SA}" \
+            -backend-config="container_name=${TFSTATE_CONTAINER}" \
+            -backend-config="key=${TFSTATE_KEY}" \
+            -backend-config="access_key=${AZURE_STORAGE_ACCESS_KEY}"
 
-      # 4️⃣ Set up OpenTofu CLI
+          tofu plan -out=plan.tfplan
+
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-${{ github.ref }}-${{ github.sha }}
+          path: ${{ env.INFRA_DIR }}/plan.tfplan
+
+  apply:
+    # Run only on main branch pushes (will do init, plan, apply)
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    # do NOT declare `needs: plan` since plan is skipped on main; keep independent
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Set up OpenTofu
         uses: opentofu/setup-opentofu@v1
+
+      - name: Login to Azure (Service Principal)
+        uses: azure/login@v1
         with:
-          tofu_version: latest
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # 5️⃣ Initialize OpenTofu backend
-      - name: Initialize OpenTofu
-        run: tofu init -reconfigure
+      - name: Init, Plan and Apply (main)
+        working-directory: ${{ env.INFRA_DIR }}
+        env:
+          TFSTATE_RG: ${{ secrets.AZURE_STATE_RG }}
+          TFSTATE_SA: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          TFSTATE_CONTAINER: ${{ secrets.AZURE_STORAGE_CONTAINER }}
+          AZURE_STORAGE_ACCESS_KEY: ${{ secrets.AZURE_STORAGE_ACCESS_KEY }}
+          TFSTATE_KEY: "prod.tfstate"
+        run: |
+          tofu init \
+            -backend-config="resource_group_name=${TFSTATE_RG}" \
+            -backend-config="storage_account_name=${TFSTATE_SA}" \
+            -backend-config="container_name=${TFSTATE_CONTAINER}" \
+            -backend-config="key=${TFSTATE_KEY}" \
+            -backend-config="access_key=${AZURE_STORAGE_ACCESS_KEY}"
 
-      # 6️⃣ Terraform plan for feature branches
-      - name: Plan Infrastructure (feature branch)
-        if: startsWith(github.ref, 'refs/heads/feature/')
-        run: tofu plan -lock=false
-
-      # 7️⃣ Terraform plan for main branch before apply (optional)
-      - name: Plan Infrastructure (main branch)
-        if: github.ref == 'refs/heads/main'
-        run: tofu plan -lock=false
-
-      # 8️⃣ Apply only on main branch
-      - name: Apply Infrastructure
-        if: github.ref == 'refs/heads/main'
-        run: tofu apply -auto-approve
+          # plan (so the log shows what will change) and then apply exactly that plan
+          tofu plan -out=prod.tfplan
+          tofu apply -auto-approve prod.tfplan
